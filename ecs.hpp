@@ -2,6 +2,7 @@
 #define __ECS_HPP__
 
 #include <cassert>
+#include <cinttypes>
 #include <cwchar>
 #include <initializer_list>
 #include <iostream>
@@ -49,10 +50,21 @@ class ObjectPool {
     inline const std::list<byte*>& get_blocks() const { return m_blocks; }
 
     template<typename _T, typename... _Args>
-    void malloc() {
+    _T* malloc(_Args... args) {
         ECS_TYPE_CONTRADICTION_ASSERT(
             TypeInfo<_T>::get_name() == m_type_name, m_type_name, TypeInfo<_T>::get_name(), "malloc"
         );
+
+        if (m_freed_locations.size() > 0) {
+            _T* object = _construct<_T>(m_freed_locations.back(), args...);
+            m_freed_locations.pop_back();
+
+            return object;
+        } else if (m_next == nullptr) {
+            _allocate_block();
+        }
+
+        return _construct<_T>(reinterpret_cast<byte*>(m_next + sizeof(ObjectPoolChunk)), args...);
     }
 
     template<typename _T>
@@ -60,32 +72,57 @@ class ObjectPool {
         ECS_TYPE_CONTRADICTION_ASSERT(
             TypeInfo<_T>::get_name() == m_type_name, m_type_name, TypeInfo<_T>::get_name(), "free"
         );
+
+        type->~_T();
+        m_freed_locations.push_back(reinterpret_cast<byte*>(type));
+    }
+
+    template<typename _T>
+    _T* cast_into(ObjectPoolChunk& ref) {
+        ECS_TYPE_CONTRADICTION_ASSERT(
+            TypeInfo<_T>::get_name() == m_type_name, m_type_name, TypeInfo<_T>::get_name(),
+            "cast_into"
+        );
+
+        byte* byte_data = reinterpret_cast<byte*>(&ref) + sizeof(ObjectPoolChunk);
+        return reinterpret_cast<_T*>(byte_data);
     }
 
     virtual void call_object_deconstructor(byte* target) = 0;
 
   private:
+    template<typename _T, typename... _Args>
+    _T* _construct(byte* location, _Args... args) {
+        _T* object = reinterpret_cast<_T*>(location);
+        new (object) _T(args...);
+        m_next = m_next->next;
+
+        return object;
+    }
+
     void _allocate_block() {
         const std::size_t chunk_size = sizeof(ObjectPoolChunk) + m_type_size;
 
-        m_blocks.push_back(new byte[chunk_size * m_block_size]);
-        byte* chunk_byte_data = m_blocks.back();
-        ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(chunk_byte_data);
-        chunk->next = reinterpret_cast<ObjectPoolChunk*>(chunk_byte_data + chunk_size);
+        byte* block = static_cast<byte*>(std::malloc(sizeof(byte*) * chunk_size * m_block_size));
+        m_blocks.push_back(block);
+        ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(block);
+        chunk->next = reinterpret_cast<ObjectPoolChunk*>(block + chunk_size);
         chunk->prev = m_next;
-        m_next->next = chunk;
 
         for (std::size_t i = 1; i < m_block_size; i++) {
-            ObjectPoolChunk* current =
-                reinterpret_cast<ObjectPoolChunk*>(chunk_byte_data + (chunk_size * i));
-            current->next =
-                reinterpret_cast<ObjectPoolChunk*>(chunk_byte_data + (chunk_size * (i + 1)));
+            ObjectPoolChunk* current = reinterpret_cast<ObjectPoolChunk*>(block + (chunk_size * i));
+            current->next = reinterpret_cast<ObjectPoolChunk*>(block + (chunk_size * (i + 1)));
             current->prev = chunk;
             chunk = current;
         }
 
         chunk->next = nullptr;
-        m_next = m_next->next;
+        if (m_next != nullptr) {
+            m_next->next = reinterpret_cast<ObjectPoolChunk*>(block);
+            m_next = m_next->next;
+        } else {
+            m_next = reinterpret_cast<ObjectPoolChunk*>(block);
+        }
     }
 
   protected:
@@ -111,7 +148,7 @@ class CreateObjectPool : public ObjectPool {
                 target->~_T();
             }
 
-            delete *it;
+            std::free(*it);
         }
     }
 
