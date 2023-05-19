@@ -12,18 +12,25 @@ struct TransformComponent {
     }
 };
 
+struct MeshRendererComponent {
+    std::string path;
+};
+
 int main(int argc, char** argv) {
     ecs::Registry registry = ecs::Registry();
-    ecs::Entity entity = registry.create_entity();
 
-    TransformComponent* transform = registry.create_component<TransformComponent>(entity, 32, 32, 32);
-    std::cout << "[" << transform->position[0] << ", " << transform->position[1] << ", "
-              << transform->position[2] << "]\n";
+    for (std::size_t i = 0; i < 5; i++) {
+        ecs::Entity entity = registry.create_entity();
+        registry.create_component<TransformComponent>(entity, i, i + 1, i + 2);
+    }
 
-    entity = registry.create_entity();
-    transform = registry.create_component<TransformComponent>(entity, 32, 32, 32);
-    std::cout << "[" << transform->position[0] << ", " << transform->position[1] << ", "
-              << transform->position[2] << "]\n";
+    auto view = ecs::View<TransformComponent, MeshRendererComponent>(&registry);
+    for (ecs::Entity entity : view) {
+        // TODO: ...
+        // auto [transform, mesh_renderer] = view.get(entity);
+
+        std::cout << entity << "\n";
+    }
 
     return 0;
 }

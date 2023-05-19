@@ -20,10 +20,8 @@
 
 #define ECS_REGISTRY_DEFAULT_POOL_BLOCK_SIZE 30
 
-#define ECS_ENTITY_DESTROYED  \
-    Entity {                  \
-        std::string::npos, {} \
-    }
+#define ECS_ENTITY_DESTROYED \
+    Entity { std::string::npos }
 
 namespace ecs {
 
@@ -36,7 +34,6 @@ struct ComponentID {
 
 struct Entity {
     std::size_t id = 0;
-    std::vector<ComponentID> comps = {};
 
     inline operator std::size_t() { return id; }
 };
@@ -51,7 +48,7 @@ struct TypeInfo {
 struct ObjectPoolChunk {
     ObjectPoolChunk* next;
     ObjectPoolChunk* prev;
-    Entity ent;
+    Entity entity;
 };
 
 class ObjectPool {
@@ -100,7 +97,7 @@ class ObjectPool {
         ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(
             reinterpret_cast<byte*>(type) - sizeof(ObjectPoolChunk)
         );
-        chunk->ent = ECS_ENTITY_DESTROYED;
+        chunk->entity = ECS_ENTITY_DESTROYED;
         m_freed_locations.push_back(chunk);
     }
 
@@ -110,7 +107,14 @@ class ObjectPool {
         ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(
             reinterpret_cast<byte*>(ptr) - sizeof(ObjectPoolChunk)
         );
-        chunk->ent = ECS_ENTITY_DESTROYED;
+        chunk->entity = ECS_ENTITY_DESTROYED;
+        m_freed_locations.push_back(chunk);
+    }
+
+    void free(ObjectPoolChunk* chunk) {
+        call_object_deconstructor(reinterpret_cast<byte*>(chunk) + sizeof(ObjectPoolChunk));
+
+        chunk->entity = ECS_ENTITY_DESTROYED;
         m_freed_locations.push_back(chunk);
     }
 
@@ -119,8 +123,7 @@ class ObjectPool {
   private:
     template<typename _T, typename... _Args>
     _T* _construct(Entity entity, ObjectPoolChunk* chunk, _Args... args) {
-        entity.comps.push_back(ComponentID{m_type_hash, chunk});
-        chunk->ent = entity;
+        chunk->entity = entity;
 
         _T* object =
             reinterpret_cast<_T*>(reinterpret_cast<byte*>(chunk) + sizeof(ObjectPoolChunk));
@@ -206,16 +209,38 @@ class Registry {
     Entity create_entity() {
         // PERF: Improve the destroyed entities system so that it is not poping back
         if (m_destroyed_entities.size() > 0) {
-            Entity ent = m_destroyed_entities.back();
-            m_entities[ent] = ent;
+            std::size_t id = m_destroyed_entities.back();
+
+            Entity entity = Entity{id};
+            m_entities[id] = entity;
+
             m_destroyed_entities.pop_back();
 
-            return m_entities[ent];
+            return m_entities[entity];
         } else {
             m_entities.push_back(Entity{m_entities.size()});
 
             return m_entities.back();
         }
+    }
+
+    inline std::vector<Entity>& get_entities() { return m_entities; }
+    inline const std::vector<Entity>& get_entities() const { return m_entities; }
+
+    template<typename _T>
+    ObjectPool* get_pool() {
+        for (ObjectPool* pool : m_pools) {
+            if (TypeInfo<_T>::get_hash() == pool->get_type_hash()) {
+                return pool;
+            }
+        }
+
+        return nullptr;
+    }
+
+    template<typename _T>
+    const ObjectPool* get_pool() const {
+        return get_pool<_T>();
     }
 
     void destroy_Entity(Entity entity) {
@@ -227,6 +252,8 @@ class Registry {
             entity < m_entities.size() && "ECS ASSERT (destroy_entity(entity)): entity provided id "
                                           "is greater than m_entities.size()"
         );
+
+        // TODO: Destroy all components ...
 
         m_destroyed_entities.push_back(entity);
         m_entities[entity] = ECS_ENTITY_DESTROYED;
@@ -257,8 +284,82 @@ class Registry {
 
   private:
     std::vector<Entity> m_entities = {};
-    std::vector<Entity> m_destroyed_entities = {};
+    std::vector<std::size_t> m_destroyed_entities = {};
     std::vector<ObjectPool*> m_pools = {};
+};
+
+template<typename _T, typename... _Ts>
+class ViewIterator {
+  public:
+    ViewIterator(std::vector<Entity>::iterator iter) : m_iter(iter) {}
+    ViewIterator(const ViewIterator& other) : m_iter(other.m_iter) {}
+
+    bool operator==(const ViewIterator& other) { return m_iter == other.m_iter; }
+    bool operator!=(const ViewIterator& other) { return m_iter != other.m_iter; }
+    Entity& operator*() { return *m_iter; }
+    Entity* operator->() { return &*m_iter; }
+
+    ViewIterator& operator++() {
+        m_iter++;
+        return *this;
+    }
+
+    ViewIterator& operator--() {
+        m_iter--;
+        return *this;
+    }
+
+    ViewIterator operator++(int) {
+        ViewIterator iter = *this;
+        ++(*this);
+        return iter;
+    }
+
+    ViewIterator operator--(int) {
+        ViewIterator iter = *this;
+        --(*this);
+        return iter;
+    }
+
+  private:
+    std::vector<Entity>::iterator m_iter;
+};
+
+template<typename _T, typename... _Ts>
+class View {
+  public:
+    using Iterator = ViewIterator<_T, _Ts...>;
+
+  public:
+    View(Registry* registry) : m_registry(registry) {
+        if constexpr (sizeof...(_Ts) > 0) {
+            _set_hashes<_T, _Ts...>();
+        } else {
+            m_hashes.push_back(TypeInfo<_T>::get_hash());
+        }
+    }
+
+    inline Iterator begin() { return Iterator(m_registry->get_entities().begin()); }
+    inline Iterator end() { return Iterator(m_registry->get_entities().end()); }
+
+    std::tuple<_T*, _Ts*...> get(Entity entity) { return m_reserved_from_valid; }
+
+    void is_valid(Entity entity) {}
+
+  private:
+    template<typename _Head, typename... _Tail>
+    void _set_hashes() {
+        m_hashes.push_back(std::tuple<std::size_t, std::size_t>(TypeInfo<_Head>::get_hash(), 0));
+
+        if constexpr (sizeof...(_Tail) > 0) {
+            _set_hashes<_Tail...>();
+        }
+    }
+
+  private:
+    Registry* m_registry = nullptr;
+    std::vector<std::tuple<std::size_t, std::size_t>> m_hashes{};
+    std::tuple<_T*, _Ts*...> m_reserved_from_valid = {};
 };
 
 } // namespace ecs
