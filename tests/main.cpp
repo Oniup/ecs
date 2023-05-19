@@ -1,31 +1,29 @@
 #include "../ecs.hpp"
 
-struct Message {
-    std::string message;
-    void print_message() { std::cout << message << "\n"; }
+struct TransformComponent {
+    float position[3] = {};
+    float scale[3] = {};
+    float rotation[4] = {};
+
+    TransformComponent(float x_pos, float y_pos, float z_pos) {
+        position[0] = x_pos;
+        position[1] = y_pos;
+        position[2] = z_pos;
+    }
 };
 
 int main(int argc, char** argv) {
-    ecs::ObjectPool* pool = new ecs::CreateObjectPool<Message>(2);
+    ecs::Registry registry = ecs::Registry();
+    ecs::Entity entity = registry.create_entity();
 
-    Message* m1 = pool->malloc<Message>();
-    m1->message = "first";
-    Message* m2 = pool->malloc<Message>();
-    m2->message = "second";
-    Message* m3 = pool->malloc<Message>();
-    m3->message = "third";
-    Message* m4 = pool->malloc<Message>();
-    m4->message = "second last message";
-    Message* m5 = pool->malloc<Message>();
-    m5->message = "last message";
+    TransformComponent* transform = registry.create_component<TransformComponent>(entity, 32, 32, 32);
+    std::cout << "[" << transform->position[0] << ", " << transform->position[1] << ", "
+              << transform->position[2] << "]\n";
 
-    pool->free(m2);
-    m1->print_message();
-    m2->print_message();
-    m3->print_message();
-    m4->print_message();
-    m5->print_message();
+    entity = registry.create_entity();
+    transform = registry.create_component<TransformComponent>(entity, 32, 32, 32);
+    std::cout << "[" << transform->position[0] << ", " << transform->position[1] << ", "
+              << transform->position[2] << "]\n";
 
-    delete pool;
     return 0;
 }

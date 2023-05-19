@@ -3,7 +3,7 @@
 
 #include <cassert>
 #include <cinttypes>
-#include <ctime>
+#include <cwchar>
 #include <initializer_list>
 #include <iostream>
 #include <list>
@@ -18,46 +18,29 @@
         assert(CONDITION&& message.c_str());                                                \
     }
 
-#define ECS_REGISTRY_DEFAULT_POOL_BLOCK_SIZE 30
-
-#define ECS_ENTITY_DESTROYED  \
-    Entity {                  \
-        std::string::npos, {} \
-    }
+#define IMAX_BITS(m) ((m) / ((m) % 255 + 1) / 255 % 255 * 8 + 7 - 86 / ((m) % 255 + 12))
+#define RAND_MAX_WIDTH IMAX_BITS(RAND_MAX)
 
 namespace ecs {
 
 typedef char byte;
-
-struct ComponentID {
-    std::size_t hash = 0;
-    struct ObjectPoolChunk* ptr = nullptr;
-};
-
-struct Entity {
-    std::size_t id = 0;
-    std::vector<ComponentID> comps = {};
-
-    inline operator std::size_t() { return id; }
-};
+typedef std::uint64_t entity;
 
 template<typename _T>
 struct TypeInfo {
     static inline const char* get_name() { return typeid(_T).name(); }
     static inline std::size_t get_size() { return static_cast<std::size_t>(sizeof(_T)); }
-    static inline std::size_t get_hash() { return typeid(_T).hash_code(); }
 };
 
 struct ObjectPoolChunk {
     ObjectPoolChunk* next;
     ObjectPoolChunk* prev;
-    Entity ent;
 };
 
 class ObjectPool {
   public:
-    ObjectPool(const std::string& name, std::size_t size, std::size_t hash, std::size_t block_size)
-        : m_type_name(name), m_type_size(size), m_type_hash(hash), m_block_size(block_size) {
+    ObjectPool(const std::string& name, std::size_t type_size, std::size_t block_size)
+        : m_type_name(name), m_type_size(type_size), m_block_size(block_size) {
         assert(m_type_name.size() > 0 && "ECS ASSERT: m_type_name must be larget than 0");
         assert(m_type_size > 0 && "ECS ASSERT: m_type_size must be larger than 0");
         assert(m_block_size > 0 && "ECS ASSERT: m_block_size must be larger than 0");
@@ -67,18 +50,17 @@ class ObjectPool {
 
     inline const std::string& get_name() const { return m_type_name; }
     inline std::size_t get_type_size() const { return m_type_size; }
-    inline std::size_t get_type_hash() const { return m_type_hash; }
     inline std::size_t get_block_size() const { return m_block_size; }
     inline const std::list<byte*>& get_blocks() const { return m_blocks; }
 
     template<typename _T, typename... _Args>
-    _T* malloc(Entity entity, _Args... args) {
+    _T* malloc(_Args... args) {
         ECS_TYPE_CONTRADICTION_ASSERT(
             TypeInfo<_T>::get_name() == m_type_name, m_type_name, TypeInfo<_T>::get_name(), "malloc"
         );
 
         if (m_freed_locations.size() > 0) {
-            _T* object = _construct<_T>(entity, m_freed_locations.back(), args...);
+            _T* object = _construct<_T>(m_freed_locations.back(), args...);
             m_freed_locations.pop_back();
 
             return object;
@@ -86,7 +68,7 @@ class ObjectPool {
             _allocate_block();
         }
 
-        return _construct<_T>(entity, m_next, args...);
+        return _construct<_T>(reinterpret_cast<byte*>(m_next + sizeof(ObjectPoolChunk)), args...);
     }
 
     template<typename _T>
@@ -96,35 +78,20 @@ class ObjectPool {
         );
 
         type->~_T();
-
-        ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(
-            reinterpret_cast<byte*>(type) - sizeof(ObjectPoolChunk)
-        );
-        chunk->ent = ECS_ENTITY_DESTROYED;
-        m_freed_locations.push_back(chunk);
+        m_freed_locations.push_back(reinterpret_cast<byte*>(type));
     }
 
     void free(byte* ptr) {
         call_object_deconstructor(ptr);
-
-        ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(
-            reinterpret_cast<byte*>(ptr) - sizeof(ObjectPoolChunk)
-        );
-        chunk->ent = ECS_ENTITY_DESTROYED;
-        m_freed_locations.push_back(chunk);
+        m_freed_locations.push_back(ptr);
     }
 
     virtual void call_object_deconstructor(byte* target) = 0;
 
   private:
     template<typename _T, typename... _Args>
-    _T* _construct(Entity entity, ObjectPoolChunk* chunk, _Args... args) {
-        entity.comps.push_back(ComponentID{m_type_hash, chunk});
-        chunk->ent = entity;
-
-        _T* object =
-            reinterpret_cast<_T*>(reinterpret_cast<byte*>(chunk) + sizeof(ObjectPoolChunk));
-
+    _T* _construct(byte* location, _Args... args) {
+        _T* object = reinterpret_cast<_T*>(location);
         new (object) _T(args...);
         m_next = m_next->next;
 
@@ -159,21 +126,17 @@ class ObjectPool {
   protected:
     const std::string m_type_name;
     const std::size_t m_type_size;
-    const std::size_t m_type_hash;
     const std::size_t m_block_size;
     std::list<byte*> m_blocks = {};
     ObjectPoolChunk* m_next = nullptr;
-    std::vector<ObjectPoolChunk*> m_freed_locations = {};
+    std::vector<byte*> m_freed_locations = {};
 };
 
 template<typename _T>
 class CreateObjectPool : public ObjectPool {
   public:
     CreateObjectPool(std::size_t block_size)
-        : ObjectPool(
-              TypeInfo<_T>::get_name(), TypeInfo<_T>::get_size(), TypeInfo<_T>::get_hash(),
-              block_size
-          ) {}
+        : ObjectPool(TypeInfo<_T>::get_name(), TypeInfo<_T>::get_size(), block_size) {}
 
     virtual ~CreateObjectPool() override {
         for (std::list<byte*>::iterator it = m_blocks.begin(); it != m_blocks.end(); it++) {
@@ -203,61 +166,28 @@ class Registry {
         }
     }
 
-    Entity create_entity() {
-        // PERF: Improve the destroyed entities system so that it is not poping back
-        if (m_destroyed_entities.size() > 0) {
-            Entity ent = m_destroyed_entities.back();
-            m_entities[ent] = ent;
-            m_destroyed_entities.pop_back();
-
-            return m_entities[ent];
-        } else {
-            m_entities.push_back(Entity{m_entities.size()});
-
-            return m_entities.back();
-        }
+    entity create_entity() {
+        m_entities.push_back(_generate_random_uuid());
+        return m_entities.back();
     }
 
-    void destroy_Entity(Entity entity) {
-        assert(
-            entity != ECS_ENTITY_DESTROYED && "ECS ASSERT (destroy_entity(entity)): entity "
-                                              "provided id is set to ECS_Entity_DESTRSOYED"
-        );
-        assert(
-            entity < m_entities.size() && "ECS ASSERT (destroy_entity(entity)): entity provided id "
-                                          "is greater than m_entities.size()"
-        );
+    void destroy_entity(entity entity) {
 
-        m_destroyed_entities.push_back(entity);
-        m_entities[entity] = ECS_ENTITY_DESTROYED;
-    }
-
-    template<typename _T, typename... _Args>
-    _T* create_component(Entity entity, _Args... args) {
-        assert(
-            entity != ECS_ENTITY_DESTROYED && "ECS ASSERT (create_component(entity, ...)): cannot "
-                                              "create component onto destroyed entity"
-        );
-
-        ObjectPool* target = nullptr;
-        for (ObjectPool* pool : m_pools) {
-            if (pool->get_type_hash() == TypeInfo<_T>::get_hash()) {
-                target = pool;
-                break;
-            }
-        }
-
-        if (target == nullptr) {
-            target = new CreateObjectPool<_T>(ECS_REGISTRY_DEFAULT_POOL_BLOCK_SIZE);
-            m_pools.push_back(target);
-        }
-
-        return target->malloc<_T>(entity, args...);
+        // TODO: Destroy all attached components
     }
 
   private:
-    std::vector<Entity> m_entities = {};
-    std::vector<Entity> m_destroyed_entities = {};
+    entity _generate_random_uuid() {
+        entity r = 0;
+        for (int i = 0; i < 64; i += RAND_MAX_WIDTH) {
+            r <<= RAND_MAX_WIDTH;
+            r ^= (unsigned)rand();
+        }
+        return r;
+    }
+
+  private:
+    std::vector<entity> m_entities = {};
     std::vector<ObjectPool*> m_pools = {};
 };
 
