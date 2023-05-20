@@ -1,5 +1,10 @@
 # Entity Component System
 
+small, simple, and templated single header ECS library that doesn't use any dependencies other
+than the C++ standard library
+
+below is an example of the libraries main features
+
 ```cpp
 // create registry
 ecs::Registry registry = ecs::Registry();
@@ -15,16 +20,20 @@ if (transform != nullptr) {
     ...
 }
 
-// get group of components
-ecs::Group<TransformComponent, MeshRendererComponent> group =
-    registry.get_group<TransformComponent, MeshRendererComponent>();
+// get view (aka group or 1) of components pushed to the registry
+auto view = ecs::View<TransformComponent, MeshRendererComponent>(&registry);
 
-// looping over group
-for (ecs::Entity ent : group) {
-    TransformComponent* transform = group.get<TransformComponent>(ent);
-    MeshRendererComponent* mesh_renderer = group.get<MeshRendererComponent>(ent);
+// looping over view and get indervidual entities components
+for (ecs::Entity entity : view) {
+    if (view.has_required(entity)) {
+        // either obtain entities through get<_T>():
+        TransformComponent* transform = view.get<TransformComponent>();
+        MeshRendererComponent* mesh_renderer = group.get<MeshRendererComponent>();
+        // or
+        auto [transform, mesh_renderer] = view.get();
 
-    ...
+        // your logic ...
+    }
 }
 
 // remove component
