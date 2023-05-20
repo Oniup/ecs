@@ -120,12 +120,19 @@ class ObjectPool {
     }
 
     template<typename _T>
-    _T* get_from_block_offset(std::size_t offset) {
-        assert(
-            offset < m_blocks.size() * m_block_size &&
-            "ECS ASSERT: cannot access pool data outside block range"
-        );
+    _T* get_from_block_offset(Entity entity) {
+        ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(m_blocks.front());
 
+        while (chunk != nullptr) {
+            if (chunk->entity == entity) {
+                byte* byte_data = reinterpret_cast<byte*>(chunk);
+                return reinterpret_cast<_T*>(byte_data + sizeof(ObjectPoolChunk));
+            } else if (chunk->entity == ECS_ENTITY_DESTROYED) {
+                break;
+            }
+
+            chunk = chunk->next;
+        }
 
         return nullptr;
     }
@@ -149,16 +156,18 @@ class ObjectPool {
     void _allocate_block() {
         const std::size_t chunk_size = sizeof(ObjectPoolChunk) + m_type_size;
 
-        byte* block = static_cast<byte*>(std::malloc(sizeof(byte*) * chunk_size * m_block_size));
+        byte* block = static_cast<byte*>(std::malloc(sizeof(byte) * chunk_size * m_block_size));
         m_blocks.push_back(block);
         ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(block);
         chunk->next = reinterpret_cast<ObjectPoolChunk*>(block + chunk_size);
+        chunk->entity = ECS_ENTITY_DESTROYED;
         chunk->prev = m_next;
 
         for (std::size_t i = 1; i < m_block_size; i++) {
             ObjectPoolChunk* current = reinterpret_cast<ObjectPoolChunk*>(block + (chunk_size * i));
             current->next = reinterpret_cast<ObjectPoolChunk*>(block + (chunk_size * (i + 1)));
             current->prev = chunk;
+            current->entity = ECS_ENTITY_DESTROYED;
             chunk = current;
         }
 
@@ -193,8 +202,9 @@ class CreateObjectPool : public ObjectPool {
     virtual ~CreateObjectPool() override {
         for (std::list<byte*>::iterator it = m_blocks.begin(); it != m_blocks.end(); it++) {
             for (std::size_t i = 0; i < m_block_size; i++) {
-                _T* target =
-                    reinterpret_cast<_T*>(*it + (sizeof(ObjectPoolChunk) + sizeof(_T) * i));
+                _T* target = reinterpret_cast<_T*>(
+                    *it + ((sizeof(ObjectPoolChunk) + sizeof(_T)) * i) + sizeof(ObjectPoolChunk)
+                );
                 target->~_T();
             }
 
@@ -353,6 +363,8 @@ class View {
         }
     }
 
+    ~View() = default;
+
     inline Iterator begin() { return Iterator(m_registry->get_entities().begin()); }
     inline Iterator end() { return Iterator(m_registry->get_entities().end()); }
 
@@ -404,12 +416,12 @@ class View {
             _Head* target_ptr = target_pool->get_from_block_offset<_Head>(entity);
 
             if (target_ptr != nullptr) {
-                std::get<target_index>(m_reserved_from_valid) = target_ptr;
+                std::get<_Head*>(m_reserved_from_valid) = target_ptr;
 
                 valid_count++;
 
                 if constexpr (sizeof...(_Tail) > 0) {
-                    fill_result(entity, target_index + 1);
+                    fill_result<_Tail...>(entity, target_index + 1, valid_count);
                 }
             }
         }

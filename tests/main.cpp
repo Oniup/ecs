@@ -1,40 +1,111 @@
 #include "../ecs.hpp"
+#include <gtest/gtest.h>
+
+struct Vector3 {
+    float x = 0;
+    float y = 0;
+    float z = 0;
+
+    Vector3() = default;
+    Vector3(float x, float y, float z) : x(x), y(y), z(z) {}
+    Vector3(const Vector3& other) : x(other.x), y(other.y), z(other.z) {}
+
+    bool operator==(const Vector3& other) { return x == other.x && y == other.y && z == other.z; }
+    bool operator!=(const Vector3& other) { return !(*this == other); }
+};
 
 struct TransformComponent {
-    float position[3] = {};
-    float scale[3] = {};
-    float rotation[4] = {};
+    Vector3 position = {};
+    Vector3 scale = {};
+    Vector3 rotation = {};
 
-    TransformComponent(float x_pos, float y_pos, float z_pos) {
-        position[0] = x_pos;
-        position[1] = y_pos;
-        position[2] = z_pos;
-    }
+    TransformComponent() = default;
+
+    TransformComponent(
+        const Vector3& position, const Vector3& scale = {}, const Vector3& rotation = {}
+    )
+        : position(position), scale(scale), rotation(rotation) {}
 };
 
-struct MeshRendererComponent {
-    std::string path;
+struct NameComponent {
+    std::string name = "";
+
+    NameComponent(const std::string& name) : name(name) {}
 };
 
-int main(int argc, char** argv) {
+TEST(Registry, create_entity) {
     ecs::Registry registry = ecs::Registry();
+    ecs::Entity entity = registry.create_entity();
 
-    for (std::size_t i = 0; i < 5; i++) {
+    EXPECT_EQ(static_cast<std::size_t>(entity), 0);
+
+    SUCCEED();
+}
+
+TEST(Registry, create_1_component) {
+    ecs::Registry registry = ecs::Registry();
+    ecs::Entity entity = registry.create_entity();
+
+    TransformComponent* transform =
+        registry.create_component<TransformComponent>(entity, Vector3(1.0f, 2.0f, 3.0f));
+
+    EXPECT_TRUE(transform != nullptr);
+    EXPECT_TRUE(transform->position == Vector3(1.0f, 2.0f, 3.0f));
+
+    SUCCEED();
+}
+
+TEST(View, has_required_for_1_component) {
+    ecs::Registry registry = ecs::Registry();
+    for (std::size_t i = 0; i < 10; i++) {
         ecs::Entity entity = registry.create_entity();
-        registry.create_component<TransformComponent>(entity, i, i + 1, i + 2);
+        registry.create_component<TransformComponent>(entity, Vector3(i, i, i));
     }
 
     auto view = ecs::View<TransformComponent>(&registry);
+    std::size_t count = 0;
     for (ecs::Entity entity : view) {
-        if (view.has_required(entity)) {
-            // auto [transform, mesh_renderer] = view.get();
-            TransformComponent* transform = view.get<TransformComponent>();
-
-            std::cout << entity << "\n";
-        } else {
-            std::cout << "failed\n";
+        bool result = view.has_required(entity);
+        EXPECT_TRUE(result);
+        if (result) {
+            count++;
         }
     }
 
-    return 0;
+    EXPECT_EQ(count, 10);
+}
+
+TEST(View, has_required_for_multiple_components) {
+    ecs::Registry registry = ecs::Registry();
+    for (std::size_t i = 0; i < 10; i++) {
+        ecs::Entity entity = registry.create_entity();
+        registry.create_component<TransformComponent>(entity, Vector3(i, i, i));
+        if (i > 5) {
+            registry.create_component<NameComponent>(
+                entity, std::string("Entity" + std::to_string(i))
+            );
+        }
+    }
+
+    auto view = ecs::View<TransformComponent, NameComponent>(&registry);
+    std::size_t i = 0;
+    std::size_t count = 0;
+    for (ecs::Entity entity : view) {
+        bool result = view.has_required(entity);
+        if (i > 5) {
+            EXPECT_TRUE(result);
+            count++;
+        } else {
+            EXPECT_FALSE(result);
+        }
+
+        i++;
+    }
+
+    EXPECT_EQ(count, 4);
+}
+
+int main(int argc, char** argv) {
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }
