@@ -265,7 +265,7 @@ class Registry {
         return get_pool<_T>();
     }
 
-    void destroy_Entity(Entity entity) {
+    void destroy_entity(Entity entity) {
         assert(
             entity != ECS_ENTITY_DESTROYED && "ECS ASSERT (destroy_entity(entity)): entity "
                                               "provided id is set to ECS_Entity_DESTRSOYED"

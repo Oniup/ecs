@@ -42,6 +42,30 @@ TEST(Registry, create_entity) {
     SUCCEED();
 }
 
+TEST(Registry, destroy_entity) {
+    ecs::Registry registry = ecs::Registry();
+    ecs::Entity target;
+
+    for (std::size_t i = 0; i < 10; i++) {
+        ecs::Entity entity = registry.create_entity();
+        if (i == 7) {
+            target = entity;
+        }
+    }
+
+    EXPECT_TRUE(target == ecs::Entity { 7 });
+    registry.destroy_entity(target);
+
+    std::vector<ecs::Entity>& entities = registry.get_entities();
+    for (std::size_t i = 0; i < entities.size(); i++) {
+        if (i == 7) {
+            EXPECT_EQ(static_cast<std::size_t>(entities[i]), std::string::npos);
+        } else {
+            EXPECT_EQ(static_cast<std::size_t>(entities[i]), i);
+        }
+    }
+}
+
 TEST(Registry, create_1_component) {
     ecs::Registry registry = ecs::Registry();
     ecs::Entity entity = registry.create_entity();
