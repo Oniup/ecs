@@ -24,12 +24,16 @@ int main(int argc, char** argv) {
         registry.create_component<TransformComponent>(entity, i, i + 1, i + 2);
     }
 
-    auto view = ecs::View<TransformComponent, MeshRendererComponent>(&registry);
+    auto view = ecs::View<TransformComponent>(&registry);
     for (ecs::Entity entity : view) {
-        // TODO: ...
-        // auto [transform, mesh_renderer] = view.get(entity);
+        if (view.has_required(entity)) {
+            // auto [transform, mesh_renderer] = view.get();
+            TransformComponent* transform = view.get<TransformComponent>();
 
-        std::cout << entity << "\n";
+            std::cout << entity << "\n";
+        } else {
+            std::cout << "failed\n";
+        }
     }
 
     return 0;

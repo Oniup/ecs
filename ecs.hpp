@@ -67,6 +67,7 @@ class ObjectPool {
     inline std::size_t get_type_hash() const { return m_type_hash; }
     inline std::size_t get_block_size() const { return m_block_size; }
     inline const std::list<byte*>& get_blocks() const { return m_blocks; }
+    inline std::list<byte*>& get_blocks() { return m_blocks; }
 
     template<typename _T, typename... _Args>
     _T* malloc(Entity entity, _Args... args) {
@@ -116,6 +117,17 @@ class ObjectPool {
 
         chunk->entity = ECS_ENTITY_DESTROYED;
         m_freed_locations.push_back(chunk);
+    }
+
+    template<typename _T>
+    _T* get_from_block_offset(std::size_t offset) {
+        assert(
+            offset < m_blocks.size() * m_block_size &&
+            "ECS ASSERT: cannot access pool data outside block range"
+        );
+
+
+        return nullptr;
     }
 
     virtual void call_object_deconstructor(byte* target) = 0;
@@ -325,6 +337,8 @@ class ViewIterator {
     std::vector<Entity>::iterator m_iter;
 };
 
+#define ECS_VIEW_SET_TUPLE_INDEX(PTR, INDEX) m_reserved_from_valid.INDEX = PTR
+
 template<typename _T, typename... _Ts>
 class View {
   public:
@@ -333,32 +347,77 @@ class View {
   public:
     View(Registry* registry) : m_registry(registry) {
         if constexpr (sizeof...(_Ts) > 0) {
-            _set_hashes<_T, _Ts...>();
+            _count_types<_T, _Ts...>();
         } else {
-            m_hashes.push_back(TypeInfo<_T>::get_hash());
+            m_type_count = 1;
         }
     }
 
     inline Iterator begin() { return Iterator(m_registry->get_entities().begin()); }
     inline Iterator end() { return Iterator(m_registry->get_entities().end()); }
 
-    std::tuple<_T*, _Ts*...> get(Entity entity) { return m_reserved_from_valid; }
+    std::tuple<_T*, _Ts*...> get() { return m_reserved_from_valid; }
 
-    void is_valid(Entity entity) {}
+    template<typename _Target>
+    _Target* get() {
+        return std::get<_Target*>(m_reserved_from_valid);
+    }
+
+    bool has_required(Entity entity) {
+        m_reserved_from_valid = {};
+        if constexpr (sizeof...(_Ts) > 0) {
+            std::size_t found_types_count = 0;
+            fill_result<_T, _Ts...>(entity, 0, found_types_count);
+
+            if (found_types_count == m_type_count) {
+                return true;
+            }
+        } else {
+            ObjectPool* target_pool = m_registry->get_pool<_T>();
+            if (target_pool != nullptr) {
+                _T* target_ptr = target_pool->get_from_block_offset<_T>(entity);
+
+                if (target_ptr != nullptr) {
+                    std::get<0>(m_reserved_from_valid) = target_ptr;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
   private:
     template<typename _Head, typename... _Tail>
-    void _set_hashes() {
-        m_hashes.push_back(std::tuple<std::size_t, std::size_t>(TypeInfo<_Head>::get_hash(), 0));
+    void _count_types() {
+        m_type_count++;
 
         if constexpr (sizeof...(_Tail) > 0) {
-            _set_hashes<_Tail...>();
+            _count_types<_Tail...>();
+        }
+    }
+
+    template<typename _Head, typename... _Tail>
+    void fill_result(Entity entity, std::size_t target_index, std::size_t& valid_count) {
+        ObjectPool* target_pool = m_registry->get_pool<_Head>();
+        if (target_pool != nullptr) {
+            _Head* target_ptr = target_pool->get_from_block_offset<_Head>(entity);
+
+            if (target_ptr != nullptr) {
+                std::get<target_index>(m_reserved_from_valid) = target_ptr;
+
+                valid_count++;
+
+                if constexpr (sizeof...(_Tail) > 0) {
+                    fill_result(entity, target_index + 1);
+                }
+            }
         }
     }
 
   private:
     Registry* m_registry = nullptr;
-    std::vector<std::tuple<std::size_t, std::size_t>> m_hashes{};
+    std::size_t m_type_count = 0;
     std::tuple<_T*, _Ts*...> m_reserved_from_valid = {};
 };
 
