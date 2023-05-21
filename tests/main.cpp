@@ -42,6 +42,15 @@ TEST(Registry, create_entity) {
     SUCCEED();
 }
 
+TEST(Registry, get_target_pool) {
+    ecs::Registry registry = ecs::Registry();
+    ecs::Entity entity = registry.create_entity();
+    registry.create_component<TransformComponent>(entity);
+
+    EXPECT_TRUE(registry.get_pool<TransformComponent>() != nullptr);
+    EXPECT_FALSE(registry.get_pool<NameComponent>() != nullptr);
+}
+
 TEST(Registry, destroy_entity) {
     ecs::Registry registry = ecs::Registry();
     ecs::Entity target;
@@ -53,7 +62,7 @@ TEST(Registry, destroy_entity) {
         }
     }
 
-    EXPECT_TRUE(target == ecs::Entity { 7 });
+    EXPECT_TRUE(target == ecs::Entity{7});
     registry.destroy_entity(target);
 
     std::vector<ecs::Entity>& entities = registry.get_entities();
@@ -64,6 +73,70 @@ TEST(Registry, destroy_entity) {
             EXPECT_EQ(static_cast<std::size_t>(entities[i]), i);
         }
     }
+}
+
+TEST(Registry, destroy_entity_with_components) {
+    ecs::Registry registry = ecs::Registry();
+    ecs::Entity target;
+
+    for (std::size_t i = 0; i < 10; i++) {
+        ecs::Entity entity = registry.create_entity();
+        registry.create_component<TransformComponent>(entity, Vector3(i, i + 1, i + 2));
+        if (i == 7) {
+            target = entity;
+        }
+    }
+
+    EXPECT_TRUE(target == ecs::Entity{7});
+    registry.destroy_entity(target);
+
+    std::vector<ecs::Entity>& entities = registry.get_entities();
+    for (std::size_t i = 0; i < entities.size(); i++) {
+        if (i == 7) {
+            EXPECT_EQ(static_cast<std::size_t>(entities[i]), std::string::npos);
+        } else {
+            EXPECT_EQ(static_cast<std::size_t>(entities[i]), i);
+        }
+    }
+
+    ecs::ObjectPool* pool = registry.get_pool<TransformComponent>();
+    ecs::byte* byte_data = pool->get_blocks().front() +
+                           (sizeof(ecs::ObjectPoolChunk) + sizeof(TransformComponent)) * 7;
+    ecs::ObjectPoolChunk* chunk = reinterpret_cast<ecs::ObjectPoolChunk*>(byte_data);
+
+    EXPECT_TRUE(chunk->entity == ECS_ENTITY_DESTROYED);
+}
+
+TEST(Registry, destroy_entity_with_components_and_deconstructor) {
+    ecs::Registry registry = ecs::Registry();
+    ecs::Entity target;
+
+    for (std::size_t i = 0; i < 10; i++) {
+        ecs::Entity entity = registry.create_entity();
+        registry.create_component<NameComponent>(entity, "entity_" + std::to_string(i));
+        if (i == 7) {
+            target = entity;
+        }
+    }
+
+    EXPECT_TRUE(target == ecs::Entity{7});
+    registry.destroy_entity(target);
+
+    std::vector<ecs::Entity>& entities = registry.get_entities();
+    for (std::size_t i = 0; i < entities.size(); i++) {
+        if (i == 7) {
+            EXPECT_EQ(static_cast<std::size_t>(entities[i]), std::string::npos);
+        } else {
+            EXPECT_EQ(static_cast<std::size_t>(entities[i]), i);
+        }
+    }
+
+    ecs::ObjectPool* pool = registry.get_pool<NameComponent>();
+    ecs::byte* byte_data =
+        pool->get_blocks().front() + (sizeof(ecs::ObjectPoolChunk) + sizeof(NameComponent)) * 7;
+    ecs::ObjectPoolChunk* chunk = reinterpret_cast<ecs::ObjectPoolChunk*>(byte_data);
+
+    EXPECT_TRUE(chunk->entity == ECS_ENTITY_DESTROYED);
 }
 
 TEST(Registry, create_1_component) {

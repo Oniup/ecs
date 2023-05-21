@@ -21,7 +21,7 @@
 #define ECS_REGISTRY_DEFAULT_POOL_BLOCK_SIZE 30
 
 #define ECS_ENTITY_DESTROYED \
-    Entity { std::string::npos }
+    ecs::Entity { std::string::npos }
 
 namespace ecs {
 
@@ -66,6 +66,9 @@ class ObjectPool {
     inline std::size_t get_type_size() const { return m_type_size; }
     inline std::size_t get_type_hash() const { return m_type_hash; }
     inline std::size_t get_block_size() const { return m_block_size; }
+    inline const std::vector<ObjectPoolChunk*> get_free_locations() const {
+        return m_freed_locations;
+    }
     inline const std::list<byte*>& get_blocks() const { return m_blocks; }
     inline std::list<byte*>& get_blocks() { return m_blocks; }
 
@@ -129,6 +132,20 @@ class ObjectPool {
                 return reinterpret_cast<_T*>(byte_data + sizeof(ObjectPoolChunk));
             } else if (chunk->entity == ECS_ENTITY_DESTROYED) {
                 break;
+            }
+
+            chunk = chunk->next;
+        }
+
+        return nullptr;
+    }
+
+    ObjectPoolChunk* get_from_block_offset(Entity entity) {
+        ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(m_blocks.front());
+
+        while (chunk != nullptr) {
+            if (chunk->entity == entity) {
+                return reinterpret_cast<ObjectPoolChunk*>(chunk);
             }
 
             chunk = chunk->next;
@@ -202,10 +219,15 @@ class CreateObjectPool : public ObjectPool {
     virtual ~CreateObjectPool() override {
         for (std::list<byte*>::iterator it = m_blocks.begin(); it != m_blocks.end(); it++) {
             for (std::size_t i = 0; i < m_block_size; i++) {
-                _T* target = reinterpret_cast<_T*>(
-                    *it + ((sizeof(ObjectPoolChunk) + sizeof(_T)) * i) + sizeof(ObjectPoolChunk)
+                ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(
+                    *it + (sizeof(ObjectPoolChunk) + sizeof(_T)) * i
                 );
-                target->~_T();
+                if (chunk->entity != ECS_ENTITY_DESTROYED) {
+                    _T* target = reinterpret_cast<_T*>(
+                        *it + ((sizeof(ObjectPoolChunk) + sizeof(_T)) * i + sizeof(ObjectPoolChunk))
+                    );
+                    target->~_T();
+                }
             }
 
             std::free(*it);
@@ -275,10 +297,16 @@ class Registry {
                                           "is greater than m_entities.size()"
         );
 
-        // TODO: Destroy all components ...
-
         m_destroyed_entities.push_back(entity);
         m_entities[entity] = ECS_ENTITY_DESTROYED;
+
+        for (ObjectPool* pool : m_pools) {
+            ObjectPoolChunk* chunk = pool->get_from_block_offset(entity);
+
+            if (chunk->entity == entity) {
+                pool->free(chunk);
+            }
+        }
     }
 
     template<typename _T, typename... _Args>
