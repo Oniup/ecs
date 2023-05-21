@@ -27,11 +27,6 @@ namespace ecs {
 
 typedef char byte;
 
-struct ComponentID {
-    std::size_t hash = 0;
-    struct ObjectPoolChunk* ptr = nullptr;
-};
-
 struct Entity {
     std::size_t id = 0;
 
@@ -122,6 +117,7 @@ class ObjectPool {
         m_freed_locations.push_back(chunk);
     }
 
+    // PERF: Improve so it isn't doing a linear search
     template<typename _T>
     _T* get_from_block_offset(Entity entity) {
         ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(m_blocks.front());
@@ -130,8 +126,6 @@ class ObjectPool {
             if (chunk->entity == entity) {
                 byte* byte_data = reinterpret_cast<byte*>(chunk);
                 return reinterpret_cast<_T*>(byte_data + sizeof(ObjectPoolChunk));
-            } else if (chunk->entity == ECS_ENTITY_DESTROYED) {
-                break;
             }
 
             chunk = chunk->next;
@@ -140,6 +134,7 @@ class ObjectPool {
         return nullptr;
     }
 
+    // PERF: Improve so it isn't doing a linear search
     ObjectPoolChunk* get_from_block_offset(Entity entity) {
         ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(m_blocks.front());
 
@@ -301,6 +296,7 @@ class Registry {
         m_entities[entity] = ECS_ENTITY_DESTROYED;
 
         for (ObjectPool* pool : m_pools) {
+            // PERF: Improve so it isn't doing a linear search
             ObjectPoolChunk* chunk = pool->get_from_block_offset(entity);
 
             if (chunk->entity == entity) {
@@ -375,8 +371,6 @@ class ViewIterator {
     std::vector<Entity>::iterator m_iter;
 };
 
-#define ECS_VIEW_SET_TUPLE_INDEX(PTR, INDEX) m_reserved_from_valid.INDEX = PTR
-
 template<typename _T, typename... _Ts>
 class View {
   public:
@@ -413,6 +407,8 @@ class View {
                 return true;
             }
         } else {
+            // PERF: Improve so it is not linearly searching for components from the beginning of the
+            // pool for every entity
             ObjectPool* target_pool = m_registry->get_pool<_T>();
             if (target_pool != nullptr) {
                 _T* target_ptr = target_pool->get_from_block_offset<_T>(entity);
