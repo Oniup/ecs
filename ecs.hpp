@@ -31,6 +31,8 @@ struct Entity {
     std::size_t id = 0;
 
     inline operator std::size_t() { return id; }
+    inline bool operator==(const Entity& other) const { return id == other.id; }
+    inline bool operator!=(const Entity& other) const { return id != other.id; }
 };
 
 template<typename _T>
@@ -119,7 +121,7 @@ class ObjectPool {
 
     // PERF: Improve so it isn't doing a linear search
     template<typename _T>
-    _T* get_from_block_offset(Entity entity) {
+    _T* get_entitys_object(Entity entity) {
         ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(m_blocks.front());
 
         while (chunk != nullptr) {
@@ -135,7 +137,7 @@ class ObjectPool {
     }
 
     // PERF: Improve so it isn't doing a linear search
-    ObjectPoolChunk* get_from_block_offset(Entity entity) {
+    ObjectPoolChunk* get_entitys_object(Entity entity) {
         ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(m_blocks.front());
 
         while (chunk != nullptr) {
@@ -282,6 +284,16 @@ class Registry {
         return get_pool<_T>();
     }
 
+    template<typename _T>
+    _T* get_component(Entity entity) {
+        ObjectPool* pool = get_pool<_T>();
+        if (pool != nullptr) {
+            return pool->get_entitys_object<_T>(entity);
+        }
+
+        return nullptr;
+    }
+
     void destroy_entity(Entity entity) {
         assert(
             entity != ECS_ENTITY_DESTROYED && "ECS ASSERT (destroy_entity(entity)): entity "
@@ -297,7 +309,7 @@ class Registry {
 
         for (ObjectPool* pool : m_pools) {
             // PERF: Improve so it isn't doing a linear search
-            ObjectPoolChunk* chunk = pool->get_from_block_offset(entity);
+            ObjectPoolChunk* chunk = pool->get_entitys_object(entity);
 
             if (chunk->entity == entity) {
                 pool->free(chunk);
@@ -407,11 +419,11 @@ class View {
                 return true;
             }
         } else {
-            // PERF: Improve so it is not linearly searching for components from the beginning of the
-            // pool for every entity
+            // PERF: Improve so it is not linearly searching for components from the beginning of
+            // the pool for every entity
             ObjectPool* target_pool = m_registry->get_pool<_T>();
             if (target_pool != nullptr) {
-                _T* target_ptr = target_pool->get_from_block_offset<_T>(entity);
+                _T* target_ptr = target_pool->get_entitys_object<_T>(entity);
 
                 if (target_ptr != nullptr) {
                     std::get<0>(m_reserved_from_valid) = target_ptr;
@@ -437,7 +449,7 @@ class View {
     void fill_result(Entity entity, std::size_t target_index, std::size_t& valid_count) {
         ObjectPool* target_pool = m_registry->get_pool<_Head>();
         if (target_pool != nullptr) {
-            _Head* target_ptr = target_pool->get_from_block_offset<_Head>(entity);
+            _Head* target_ptr = target_pool->get_entitys_object<_Head>(entity);
 
             if (target_ptr != nullptr) {
                 std::get<_Head*>(m_reserved_from_valid) = target_ptr;
