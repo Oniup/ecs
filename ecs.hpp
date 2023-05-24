@@ -311,8 +311,10 @@ class Registry {
             // PERF: Improve so it isn't doing a linear search
             ObjectPoolChunk* chunk = pool->get_entitys_object(entity);
 
-            if (chunk->entity == entity) {
-                pool->free(chunk);
+            if (chunk != nullptr) {
+                if (chunk->entity == entity) {
+                    pool->free(chunk);
+                }
             }
         }
     }
@@ -410,6 +412,10 @@ class View {
     }
 
     bool has_required(Entity entity) {
+        if (entity == ECS_ENTITY_DESTROYED) {
+            return false;
+        }
+
         m_reserved_from_valid = {};
         if constexpr (sizeof...(_Ts) > 0) {
             std::size_t found_types_count = 0;
