@@ -1,6 +1,7 @@
 #ifndef __ECS_HPP__
 #define __ECS_HPP__
 
+#include <array>
 #include <cassert>
 #include <cinttypes>
 #include <ctime>
@@ -25,6 +26,71 @@
 
 namespace ecs {
 
+namespace type_descriptor {
+
+    template<typename _T>
+    constexpr const char* get_wrapped_type_name() {
+#if defined(__clang__)
+        return __PRETTY_FUNCTION__;
+#elif defined(__GNUC__) || defined(__GNUG__)
+        return __PRETTY_FUNCTION__;
+#elif defind(_MSC_VER)
+        return _SIGFUNC;
+#else
+#    error "Unsuppored compiler ecs system"
+#endif
+    }
+
+    constexpr std::size_t get_wrapped_type_name_prefix_length() {
+        constexpr const char* wrapped_name = get_wrapped_type_name<void>();
+        constexpr std::size_t wrapped_length = std::char_traits<char>::length(wrapped_name);
+
+        std::size_t offset = 0;
+        for (; offset < wrapped_length - 4; offset++) {
+            if (std::char_traits<char>::compare(wrapped_name + offset, "void", 4) == 0) {
+                break;
+            }
+        }
+        return offset;
+    }
+
+    constexpr std::size_t get_wrapped_type_name_suffix_length() {
+        return std::char_traits<char>::length(get_wrapped_type_name<void>()) -
+               get_wrapped_type_name_prefix_length() - 4;
+    }
+
+    template<typename _T>
+    constexpr auto get_name() {
+        constexpr const char* wrapped_type_name = get_wrapped_type_name<_T>();
+        constexpr std::size_t wrapped_type_length =
+            std::char_traits<char>::length(wrapped_type_name);
+
+        constexpr std::size_t prefix_length = get_wrapped_type_name_prefix_length();
+        constexpr std::size_t suffix_lenght = get_wrapped_type_name_suffix_length();
+
+        std::array<char, wrapped_type_length - prefix_length - suffix_lenght> substr;
+        for (std::size_t i = 0; i < substr.size(); i++) {
+            substr[i] = (wrapped_type_name + prefix_length)[i];
+        }
+        substr[substr.size()] = '\0';
+        return substr;
+    }
+
+    template<std::size_t _Size>
+    constexpr std::uint64_t get_hash(const std::array<char, _Size>& str) {
+        constexpr std::uint64_t prime = 0x00000100000001B3;
+
+        std::uint64_t hash = 0xcbf29ce484222325;
+        for (char c : str) {
+            hash *= prime;
+            hash ^= static_cast<std::uint64_t>(c);
+        }
+
+        return hash;
+    }
+
+} // namespace type_descriptor
+
 typedef char byte;
 
 struct Entity {
@@ -35,13 +101,6 @@ struct Entity {
     inline bool operator!=(const Entity& other) const { return id != other.id; }
 };
 
-template<typename _T>
-struct TypeInfo {
-    static inline const char* get_name() { return typeid(_T).name(); }
-    static inline std::size_t get_size() { return static_cast<std::size_t>(sizeof(_T)); }
-    static inline std::size_t get_hash() { return typeid(_T).hash_code(); }
-};
-
 struct ObjectPoolChunk {
     ObjectPoolChunk* next;
     ObjectPoolChunk* prev;
@@ -50,7 +109,9 @@ struct ObjectPoolChunk {
 
 class ObjectPool {
   public:
-    ObjectPool(const std::string& name, std::size_t size, std::size_t hash, std::size_t block_size)
+    ObjectPool(
+        const std::string& name, std::size_t size, std::uint64_t hash, std::size_t block_size
+    )
         : m_type_name(name), m_type_size(size), m_type_hash(hash), m_block_size(block_size) {
         assert(m_type_name.size() > 0 && "ECS ASSERT: m_type_name must be larget than 0");
         assert(m_type_size > 0 && "ECS ASSERT: m_type_size must be larger than 0");
@@ -61,7 +122,7 @@ class ObjectPool {
 
     inline const std::string& get_name() const { return m_type_name; }
     inline std::size_t get_type_size() const { return m_type_size; }
-    inline std::size_t get_type_hash() const { return m_type_hash; }
+    inline std::uint64_t get_type_hash() const { return m_type_hash; }
     inline std::size_t get_block_size() const { return m_block_size; }
     inline const std::vector<ObjectPoolChunk*> get_free_locations() const {
         return m_freed_locations;
@@ -72,7 +133,8 @@ class ObjectPool {
     template<typename _T, typename... _Args>
     _T* malloc(Entity entity, _Args... args) {
         ECS_TYPE_CONTRADICTION_ASSERT(
-            TypeInfo<_T>::get_name() == m_type_name, m_type_name, TypeInfo<_T>::get_name(), "malloc"
+            std::string(type_descriptor::get_name<_T>().data()) == m_type_name, m_type_name,
+            type_descriptor::get_name<_T>().data(), "malloc"
         );
 
         if (m_freed_locations.size() > 0) {
@@ -90,7 +152,8 @@ class ObjectPool {
     template<typename _T>
     void free(_T* type) {
         ECS_TYPE_CONTRADICTION_ASSERT(
-            TypeInfo<_T>::get_name() == m_type_name, m_type_name, TypeInfo<_T>::get_name(), "free"
+            std::string(type_descriptor::get_name<_T>().data()) == m_type_name, m_type_name,
+            type_descriptor::get_name<_T>().data(), "free"
         );
 
         type->~_T();
@@ -197,7 +260,7 @@ class ObjectPool {
   protected:
     const std::string m_type_name;
     const std::size_t m_type_size;
-    const std::size_t m_type_hash;
+    const std::uint64_t m_type_hash;
     const std::size_t m_block_size;
     std::list<byte*> m_blocks = {};
     ObjectPoolChunk* m_next = nullptr;
@@ -209,8 +272,8 @@ class CreateObjectPool : public ObjectPool {
   public:
     CreateObjectPool(std::size_t block_size)
         : ObjectPool(
-              TypeInfo<_T>::get_name(), TypeInfo<_T>::get_size(), TypeInfo<_T>::get_hash(),
-              block_size
+              std::string(type_descriptor::get_name<_T>().data()), sizeof(_T),
+              type_descriptor::get_hash(type_descriptor::get_name<_T>()), block_size
           ) {}
 
     virtual ~CreateObjectPool() override {
@@ -271,7 +334,8 @@ class Registry {
     template<typename _T>
     ObjectPool* get_pool() {
         for (ObjectPool* pool : m_pools) {
-            if (TypeInfo<_T>::get_hash() == pool->get_type_hash()) {
+            if (type_descriptor::get_hash(type_descriptor::get_name<_T>()) ==
+                pool->get_type_hash()) {
                 return pool;
             }
         }
@@ -328,7 +392,8 @@ class Registry {
 
         ObjectPool* target = nullptr;
         for (ObjectPool* pool : m_pools) {
-            if (pool->get_type_hash() == TypeInfo<_T>::get_hash()) {
+            if (pool->get_type_hash() ==
+                type_descriptor::get_hash(type_descriptor::get_name<_T>())) {
                 target = pool;
                 break;
             }
