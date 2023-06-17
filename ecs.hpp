@@ -329,23 +329,30 @@ class Registry {
     }
 
     inline std::vector<Entity>& get_entities() { return m_entities; }
+    inline std::vector<ObjectPool*>& get_pools() { return m_pools; }
     inline const std::vector<Entity>& get_entities() const { return m_entities; }
+    inline const std::vector<ObjectPool*>& get_pools() const { return m_pools; }
 
     template<typename _T>
-    ObjectPool* get_pool() {
+    inline ObjectPool* get_pool() {
+        return get_pool(type_descriptor::get_hash(type_descriptor::get_name<_T>()));
+    }
+
+    template<typename _T>
+    inline const ObjectPool* get_pool() const {
+        return get_pool(type_descriptor::get_hash(type_descriptor::get_name<_T>()));
+    }
+
+    inline const ObjectPool* get_pool(std::uint64_t hash) const { return get_pool(hash); }
+
+    ObjectPool* get_pool(std::uint64_t hash) {
         for (ObjectPool* pool : m_pools) {
-            if (type_descriptor::get_hash(type_descriptor::get_name<_T>()) ==
-                pool->get_type_hash()) {
+            if (pool->get_type_hash() == hash) {
                 return pool;
             }
         }
 
         return nullptr;
-    }
-
-    template<typename _T>
-    const ObjectPool* get_pool() const {
-        return get_pool<_T>();
     }
 
     template<typename _T>
@@ -355,6 +362,15 @@ class Registry {
             return pool->get_entitys_object<_T>(entity);
         }
 
+        return nullptr;
+    }
+
+    void* get_component(Entity entity, std::uint64_t hash) {
+        ObjectPool* pool = get_pool(hash);
+        if (pool != nullptr) {
+            byte* byte_data = reinterpret_cast<byte*>(pool->get_entitys_object(entity));
+            return reinterpret_cast<void*>(byte_data + sizeof(ObjectPoolChunk));
+        }
         return nullptr;
     }
 
