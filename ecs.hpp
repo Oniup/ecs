@@ -116,9 +116,38 @@ struct ObjectPoolChunk
     Entity entity;
 };
 
+typedef void (*fnptr_objectpool_type_deconstructor)(byte* type);
+typedef void (*fnptr_objectpool_type_default_constructor)(byte* type);
+
 class ObjectPool
 {
   public:
+    template<typename _T>
+    static ObjectPool* create(std::size_t block_size)
+    {
+        ObjectPool* pool = new ObjectPool(
+            std::string(type_descriptor::get_name<_T>().data()), sizeof(_T),
+            type_descriptor::get_hash(type_descriptor::get_name<_T>()), block_size
+        );
+
+        pool->m_type_default_constructor = [](byte* target)
+        {
+            _T* target_type = reinterpret_cast<_T*>(target);
+            new (target_type) _T();
+        };
+
+        pool->m_type_deconstructor = [](byte* target)
+        {
+            _T* target_type = reinterpret_cast<_T*>(target);
+            target_type->~_T();
+        };
+
+        return pool;
+    }
+
+  public:
+    ObjectPool() = default;
+
     ObjectPool(
         const std::string& name, std::size_t size, std::uint64_t hash, std::size_t block_size
     )
@@ -129,7 +158,36 @@ class ObjectPool
         assert(m_block_size > 0 && "ECS ASSERT: m_block_size must be larger than 0");
     }
 
-    virtual ~ObjectPool() = default;
+    ~ObjectPool()
+    {
+        for (std::list<byte*>::iterator it = m_blocks.begin(); it != m_blocks.end(); it++)
+        {
+            for (std::size_t i = 0; i < m_block_size; i++)
+            {
+                ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(
+                    *it + (sizeof(ObjectPoolChunk) + m_type_size) * i
+                );
+                if (chunk->entity != ECS_ENTITY_DESTROYED)
+                {
+                    if (m_type_deconstructor != nullptr)
+                    {
+                        byte* target = reinterpret_cast<byte*>(
+                            *it +
+                            ((sizeof(ObjectPoolChunk) + m_type_size) * i + sizeof(ObjectPoolChunk))
+                        );
+                        m_type_deconstructor(target);
+                    }
+                }
+            }
+
+            std::free(*it);
+        }
+    }
+
+    inline void set_deconstructor(fnptr_objectpool_type_deconstructor deconstructor)
+    {
+        m_type_deconstructor = deconstructor;
+    }
 
     inline const std::string& get_name() const { return m_type_name; }
     inline std::size_t get_type_size() const { return m_type_size; }
@@ -165,6 +223,21 @@ class ObjectPool
         return _construct<_T>(entity, m_next, args...);
     }
 
+    void* malloc(Entity entity)
+    {
+        if (m_freed_locations.size() > 0)
+        {
+            void* object = _construct(entity, m_freed_locations.back());
+            m_freed_locations.pop_back();
+
+            return object;
+        }
+        else if (m_next == nullptr)
+            _allocate_block();
+
+        return _construct(entity, m_next);
+    }
+
     template<typename _T>
     void free(_T* type)
     {
@@ -184,7 +257,7 @@ class ObjectPool
 
     void free(byte* ptr)
     {
-        call_object_deconstructor(ptr);
+        m_type_deconstructor(ptr);
 
         ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(
             reinterpret_cast<byte*>(ptr) - sizeof(ObjectPoolChunk)
@@ -195,7 +268,7 @@ class ObjectPool
 
     void free(ObjectPoolChunk* chunk)
     {
-        call_object_deconstructor(reinterpret_cast<byte*>(chunk) + sizeof(ObjectPoolChunk));
+        m_type_deconstructor(reinterpret_cast<byte*>(chunk) + sizeof(ObjectPoolChunk));
 
         chunk->entity = ECS_ENTITY_DESTROYED;
         m_freed_locations.push_back(chunk);
@@ -221,8 +294,26 @@ class ObjectPool
         return nullptr;
     }
 
+    byte* get_entitys_object(Entity entity)
+    {
+        ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(m_blocks.front());
+
+        while (chunk != nullptr)
+        {
+            if (chunk->entity == entity)
+            {
+                byte* byte_data = reinterpret_cast<byte*>(chunk);
+                return byte_data + sizeof(ObjectPoolChunk);
+            }
+
+            chunk = chunk->next;
+        }
+
+        return nullptr;
+    }
+
     // PERF: Improve so it isn't doing a linear search
-    ObjectPoolChunk* get_entitys_object(Entity entity)
+    ObjectPoolChunk* get_entitys_object_pool_chunk(Entity entity)
     {
         ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(m_blocks.front());
 
@@ -237,8 +328,6 @@ class ObjectPool
         return nullptr;
     }
 
-    virtual void call_object_deconstructor(byte* target) = 0;
-
   private:
     template<typename _T, typename... _Args>
     _T* _construct(Entity entity, ObjectPoolChunk* chunk, _Args... args)
@@ -249,6 +338,17 @@ class ObjectPool
             reinterpret_cast<_T*>(reinterpret_cast<byte*>(chunk) + sizeof(ObjectPoolChunk));
 
         new (object) _T(args...);
+        m_next = m_next->next;
+
+        return object;
+    }
+
+    void* _construct(Entity entity, ObjectPoolChunk* chunk)
+    {
+        chunk->entity = entity;
+
+        byte* object = reinterpret_cast<byte*>(chunk) + sizeof(ObjectPoolChunk);
+        m_type_default_constructor(object);
         m_next = m_next->next;
 
         return object;
@@ -285,54 +385,15 @@ class ObjectPool
     }
 
   protected:
-    const std::string m_type_name;
-    const std::size_t m_type_size;
-    const std::uint64_t m_type_hash;
-    const std::size_t m_block_size;
+    const std::string m_type_name = "";
+    const std::size_t m_type_size = 0;
+    const std::uint64_t m_type_hash = 0;
+    const std::size_t m_block_size = 0;
     std::list<byte*> m_blocks = {};
     ObjectPoolChunk* m_next = nullptr;
     std::vector<ObjectPoolChunk*> m_freed_locations = {};
-};
-
-template<typename _T>
-class CreateObjectPool : public ObjectPool
-{
-  public:
-    CreateObjectPool(std::size_t block_size)
-        : ObjectPool(
-              std::string(type_descriptor::get_name<_T>().data()), sizeof(_T),
-              type_descriptor::get_hash(type_descriptor::get_name<_T>()), block_size
-          )
-    {
-    }
-
-    virtual ~CreateObjectPool() override
-    {
-        for (std::list<byte*>::iterator it = m_blocks.begin(); it != m_blocks.end(); it++)
-        {
-            for (std::size_t i = 0; i < m_block_size; i++)
-            {
-                ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(
-                    *it + (sizeof(ObjectPoolChunk) + sizeof(_T)) * i
-                );
-                if (chunk->entity != ECS_ENTITY_DESTROYED)
-                {
-                    _T* target = reinterpret_cast<_T*>(
-                        *it + ((sizeof(ObjectPoolChunk) + sizeof(_T)) * i + sizeof(ObjectPoolChunk))
-                    );
-                    target->~_T();
-                }
-            }
-
-            std::free(*it);
-        }
-    }
-
-    virtual void call_object_deconstructor(byte* target) override
-    {
-        _T* target_type = reinterpret_cast<_T*>(target);
-        target_type->~_T();
-    }
+    fnptr_objectpool_type_default_constructor m_type_default_constructor = nullptr;
+    fnptr_objectpool_type_deconstructor m_type_deconstructor = nullptr;
 };
 
 class Registry
@@ -413,7 +474,7 @@ class Registry
         ObjectPool* pool = get_pool(hash);
         if (pool != nullptr)
         {
-            byte* byte_data = reinterpret_cast<byte*>(pool->get_entitys_object(entity));
+            byte* byte_data = reinterpret_cast<byte*>(pool->get_entitys_object_pool_chunk(entity));
             return reinterpret_cast<void*>(byte_data + sizeof(ObjectPoolChunk));
         }
         return nullptr;
@@ -436,7 +497,7 @@ class Registry
         for (ObjectPool* pool : m_pools)
         {
             // PERF: Improve so it isn't doing a linear search
-            ObjectPoolChunk* chunk = pool->get_entitys_object(entity);
+            ObjectPoolChunk* chunk = pool->get_entitys_object_pool_chunk(entity);
 
             if (chunk != nullptr)
             {
@@ -454,23 +515,37 @@ class Registry
                                               "create component onto destroyed entity"
         );
 
-        ObjectPool* target = nullptr;
-        for (ObjectPool* pool : m_pools)
-        {
-            if (pool->get_type_hash() == type_descriptor::get_hash(type_descriptor::get_name<_T>()))
-            {
-                target = pool;
-                break;
-            }
-        }
-
+        ObjectPool* target = get_pool<_T>();
         if (target == nullptr)
         {
-            target = new CreateObjectPool<_T>(ECS_REGISTRY_DEFAULT_POOL_BLOCK_SIZE);
+            target = ObjectPool::create<_T>(ECS_REGISTRY_DEFAULT_POOL_BLOCK_SIZE);
             m_pools.push_back(target);
         }
 
         return target->malloc<_T>(entity, args...);
+    }
+
+    bool create_component(
+        Entity entity, std::uint64_t id, const std::string& name, std::size_t size,
+        fnptr_objectpool_type_deconstructor deconstructor,
+        std::size_t block_size = ECS_REGISTRY_DEFAULT_POOL_BLOCK_SIZE
+    )
+    {
+        assert(
+            entity != ECS_ENTITY_DESTROYED && "ECS ASSERT (create_component(entity, ...)): cannot "
+                                              "create component onto destroyed entity"
+        );
+
+        ObjectPool* target = get_pool(id);
+        if (target == nullptr)
+        {
+            target = new ObjectPool(name, size, id, block_size);
+            target->set_deconstructor(deconstructor);
+            m_pools.push_back(target);
+
+            return true;
+        }
+        return false;
     }
 
   private:
