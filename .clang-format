@@ -2,6 +2,22 @@
 BasedOnStyle: LLVM
 Language: Cpp
 AlignAfterOpenBracket: BlockIndent
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: true
+  AfterClass: false
+  AfterControlStatement: true
+  AfterFunction: true
+  AfterClass: true
+  AfterStruct: true
+  AfterEnum: true
+  AfterUnion: true
+  AfterNamespace: false
+  BeforeCatch: true
+  BeforeElse: true
+  SplitEmptyNamespace: true
+  SplitEmptyRecord: true
+  SplitEmptyFunction: true
 AlwaysBreakTemplateDeclarations: Yes
 AlignEscapedNewlines: Left
 AlignTrailingComments: true
@@ -10,7 +26,6 @@ CommentPragmas: ""
 IndentPPDirectives: AfterHash
 IndentWidth: 4
 IndentWrappedFunctionNames: true
-InsertBraces: true
 InsertNewlineAtEOF: true
 NamespaceIndentation: Inner
 PackConstructorInitializers: NextLine
@@ -19,4 +34,3 @@ QualifierAlignment: Left
 SpaceAfterTemplateKeyword: false
 Standard: c++20
 TabWidth: 4
-

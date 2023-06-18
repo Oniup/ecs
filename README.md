@@ -16,7 +16,8 @@ ecs::Entity entity = registry.create_entity();
 TransformComponent* transform = registry.create_component<TransformComponent>(entity);
 registry.create_component<MeshRendererComponent>(entity);
 
-if (transform != nullptr) {
+if (transform != nullptr) 
+{
     ...
 }
 
@@ -24,8 +25,10 @@ if (transform != nullptr) {
 auto view = ecs::View<TransformComponent, MeshRendererComponent>(&registry);
 
 // looping over view and get indervidual entities components
-for (ecs::Entity entity : view) {
-    if (view.has_required(entity)) {
+for (ecs::Entity entity : view) 
+{
+    if (view.has_required(entity)) 
+    {
         // either obtain entities through get<_T>():
         TransformComponent* transform = view.get<TransformComponent>();
         MeshRendererComponent* mesh_renderer = group.get<MeshRendererComponent>();

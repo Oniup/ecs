@@ -1,7 +1,8 @@
 #include "../ecs.hpp"
 #include <gtest/gtest.h>
 
-struct Vector3 {
+struct Vector3
+{
     float x = 0;
     float y = 0;
     float z = 0;
@@ -14,7 +15,8 @@ struct Vector3 {
     bool operator!=(const Vector3& other) { return !(*this == other); }
 };
 
-struct TransformComponent {
+struct TransformComponent
+{
     Vector3 position = {};
     Vector3 scale = {};
     Vector3 rotation = {};
@@ -24,16 +26,20 @@ struct TransformComponent {
     TransformComponent(
         const Vector3& position, const Vector3& scale = {}, const Vector3& rotation = {}
     )
-        : position(position), scale(scale), rotation(rotation) {}
+        : position(position), scale(scale), rotation(rotation)
+    {
+    }
 };
 
-struct NameComponent {
+struct NameComponent
+{
     std::string name = "";
 
     NameComponent(const std::string& name) : name(name) {}
 };
 
-TEST(Registry, create_entity) {
+TEST(Registry, create_entity)
+{
     ecs::Registry registry = ecs::Registry();
     ecs::Entity entity = registry.create_entity();
 
@@ -42,7 +48,8 @@ TEST(Registry, create_entity) {
     SUCCEED();
 }
 
-TEST(Registry, get_target_pool) {
+TEST(Registry, get_target_pool)
+{
     ecs::Registry registry = ecs::Registry();
     ecs::Entity entity = registry.create_entity();
     registry.create_component<TransformComponent>(entity);
@@ -51,38 +58,42 @@ TEST(Registry, get_target_pool) {
     EXPECT_FALSE(registry.get_pool<NameComponent>() != nullptr);
 }
 
-TEST(Registry, destroy_entity) {
+TEST(Registry, destroy_entity)
+{
     ecs::Registry registry = ecs::Registry();
     ecs::Entity target;
 
-    for (std::size_t i = 0; i < 10; i++) {
+    for (std::size_t i = 0; i < 10; i++)
+    {
         ecs::Entity entity = registry.create_entity();
-        if (i == 7) {
+        if (i == 7)
             target = entity;
-        }
     }
 
     EXPECT_TRUE(target == ecs::Entity{7});
     registry.destroy_entity(target);
 
     std::vector<ecs::Entity>& entities = registry.get_entities();
-    for (std::size_t i = 0; i < entities.size(); i++) {
-        if (i == 7) {
+    for (std::size_t i = 0; i < entities.size(); i++)
+    {
+        if (i == 7)
             EXPECT_EQ(static_cast<std::size_t>(entities[i]), std::string::npos);
-        } else {
+        else
             EXPECT_EQ(static_cast<std::size_t>(entities[i]), i);
-        }
     }
 }
 
-TEST(Registry, destroy_entity_with_components) {
+TEST(Registry, destroy_entity_with_components)
+{
     ecs::Registry registry = ecs::Registry();
     ecs::Entity target;
 
-    for (std::size_t i = 0; i < 10; i++) {
+    for (std::size_t i = 0; i < 10; i++)
+    {
         ecs::Entity entity = registry.create_entity();
         registry.create_component<TransformComponent>(entity, Vector3(i, i + 1, i + 2));
-        if (i == 7) {
+        if (i == 7)
+        {
             target = entity;
         }
     }
@@ -91,12 +102,12 @@ TEST(Registry, destroy_entity_with_components) {
     registry.destroy_entity(target);
 
     std::vector<ecs::Entity>& entities = registry.get_entities();
-    for (std::size_t i = 0; i < entities.size(); i++) {
-        if (i == 7) {
+    for (std::size_t i = 0; i < entities.size(); i++)
+    {
+        if (i == 7)
             EXPECT_EQ(static_cast<std::size_t>(entities[i]), std::string::npos);
-        } else {
+        else
             EXPECT_EQ(static_cast<std::size_t>(entities[i]), i);
-        }
     }
 
     ecs::ObjectPool* pool = registry.get_pool<TransformComponent>();
@@ -107,28 +118,29 @@ TEST(Registry, destroy_entity_with_components) {
     EXPECT_TRUE(chunk->entity == ECS_ENTITY_DESTROYED);
 }
 
-TEST(Registry, destroy_entity_with_components_and_deconstructor) {
+TEST(Registry, destroy_entity_with_components_and_deconstructor)
+{
     ecs::Registry registry = ecs::Registry();
     ecs::Entity target;
 
-    for (std::size_t i = 0; i < 10; i++) {
+    for (std::size_t i = 0; i < 10; i++)
+    {
         ecs::Entity entity = registry.create_entity();
         registry.create_component<NameComponent>(entity, "entity_" + std::to_string(i));
-        if (i == 7) {
+        if (i == 7)
             target = entity;
-        }
     }
 
     EXPECT_TRUE(target == ecs::Entity{7});
     registry.destroy_entity(target);
 
     std::vector<ecs::Entity>& entities = registry.get_entities();
-    for (std::size_t i = 0; i < entities.size(); i++) {
-        if (i == 7) {
+    for (std::size_t i = 0; i < entities.size(); i++)
+    {
+        if (i == 7)
             EXPECT_EQ(static_cast<std::size_t>(entities[i]), std::string::npos);
-        } else {
+        else
             EXPECT_EQ(static_cast<std::size_t>(entities[i]), i);
-        }
     }
 
     ecs::ObjectPool* pool = registry.get_pool<NameComponent>();
@@ -139,7 +151,8 @@ TEST(Registry, destroy_entity_with_components_and_deconstructor) {
     EXPECT_TRUE(chunk->entity == ECS_ENTITY_DESTROYED);
 }
 
-TEST(Registry, create_1_component) {
+TEST(Registry, create_1_component)
+{
     ecs::Registry registry = ecs::Registry();
     ecs::Entity entity = registry.create_entity();
 
@@ -152,32 +165,37 @@ TEST(Registry, create_1_component) {
     SUCCEED();
 }
 
-TEST(View, has_required_for_1_component) {
+TEST(View, has_required_for_1_component)
+{
     ecs::Registry registry = ecs::Registry();
-    for (std::size_t i = 0; i < 10; i++) {
+    for (std::size_t i = 0; i < 10; i++)
+    {
         ecs::Entity entity = registry.create_entity();
         registry.create_component<TransformComponent>(entity, Vector3(i, i, i));
     }
 
     auto view = ecs::View<TransformComponent>(&registry);
     std::size_t count = 0;
-    for (ecs::Entity entity : view) {
+    for (ecs::Entity entity : view)
+    {
         bool result = view.has_required(entity);
         EXPECT_TRUE(result);
-        if (result) {
+        if (result)
             count++;
-        }
     }
 
     EXPECT_EQ(count, 10);
 }
 
-TEST(View, has_required_for_multiple_components) {
+TEST(View, has_required_for_multiple_components)
+{
     ecs::Registry registry = ecs::Registry();
-    for (std::size_t i = 0; i < 10; i++) {
+    for (std::size_t i = 0; i < 10; i++)
+    {
         ecs::Entity entity = registry.create_entity();
         registry.create_component<TransformComponent>(entity, Vector3(i, i, i));
-        if (i > 5) {
+        if (i > 5)
+        {
             registry.create_component<NameComponent>(
                 entity, std::string("Entity" + std::to_string(i))
             );
@@ -187,14 +205,16 @@ TEST(View, has_required_for_multiple_components) {
     auto view = ecs::View<TransformComponent, NameComponent>(&registry);
     std::size_t i = 0;
     std::size_t count = 0;
-    for (ecs::Entity entity : view) {
+    for (ecs::Entity entity : view)
+    {
         bool result = view.has_required(entity);
-        if (i > 5) {
+        if (i > 5)
+        {
             EXPECT_TRUE(result);
             count++;
-        } else {
-            EXPECT_FALSE(result);
         }
+        else
+            EXPECT_FALSE(result);
 
         i++;
     }
@@ -202,7 +222,8 @@ TEST(View, has_required_for_multiple_components) {
     EXPECT_EQ(count, 4);
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
     testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
