@@ -184,6 +184,11 @@ class ObjectPool
         }
     }
 
+    inline void set_default_constructor(fnptr_objectpool_type_default_constructor constructor)
+    {
+        m_type_default_constructor = constructor;
+    }
+
     inline void set_deconstructor(fnptr_objectpool_type_deconstructor deconstructor)
     {
         m_type_deconstructor = deconstructor;
@@ -223,11 +228,11 @@ class ObjectPool
         return _construct<_T>(entity, m_next, args...);
     }
 
-    void* malloc(Entity entity)
+    byte* malloc(Entity entity)
     {
         if (m_freed_locations.size() > 0)
         {
-            void* object = _construct(entity, m_freed_locations.back());
+            byte* object = _construct(entity, m_freed_locations.back());
             m_freed_locations.pop_back();
 
             return object;
@@ -343,7 +348,7 @@ class ObjectPool
         return object;
     }
 
-    void* _construct(Entity entity, ObjectPoolChunk* chunk)
+    byte* _construct(Entity entity, ObjectPoolChunk* chunk)
     {
         chunk->entity = entity;
 
@@ -525,9 +530,10 @@ class Registry
         return target->malloc<_T>(entity, args...);
     }
 
-    bool create_component(
+    void* create_component(
         Entity entity, std::uint64_t id, const std::string& name, std::size_t size,
         fnptr_objectpool_type_deconstructor deconstructor,
+        fnptr_objectpool_type_default_constructor default_constsructor,
         std::size_t block_size = ECS_REGISTRY_DEFAULT_POOL_BLOCK_SIZE
     )
     {
@@ -541,11 +547,11 @@ class Registry
         {
             target = new ObjectPool(name, size, id, block_size);
             target->set_deconstructor(deconstructor);
+            target->set_default_constructor(default_constsructor);
             m_pools.push_back(target);
-
-            return true;
         }
-        return false;
+
+        return target->malloc(entity);
     }
 
   private:
