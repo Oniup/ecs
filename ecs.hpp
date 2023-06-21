@@ -98,8 +98,6 @@ namespace type_descriptor {
 
 } // namespace type_descriptor
 
-typedef char byte;
-
 struct Entity
 {
     std::size_t id = 0;
@@ -116,8 +114,8 @@ struct ObjectPoolChunk
     Entity entity;
 };
 
-typedef void (*fnptr_objectpool_type_deconstructor)(byte* type);
-typedef void (*fnptr_objectpool_type_default_constructor)(byte* type);
+typedef void (*fnptr_objectpool_type_deconstructor)(std::byte* type);
+typedef void (*fnptr_objectpool_type_default_constructor)(std::byte* type);
 
 class ObjectPool
 {
@@ -130,13 +128,13 @@ class ObjectPool
             type_descriptor::get_hash(type_descriptor::get_name<_T>()), block_size
         );
 
-        pool->m_type_default_constructor = [](byte* target)
+        pool->m_type_default_constructor = [](std::byte* target)
         {
             _T* target_type = reinterpret_cast<_T*>(target);
             new (target_type) _T();
         };
 
-        pool->m_type_deconstructor = [](byte* target)
+        pool->m_type_deconstructor = [](std::byte* target)
         {
             _T* target_type = reinterpret_cast<_T*>(target);
             target_type->~_T();
@@ -160,7 +158,7 @@ class ObjectPool
 
     ~ObjectPool()
     {
-        for (std::list<byte*>::iterator it = m_blocks.begin(); it != m_blocks.end(); it++)
+        for (std::list<std::byte*>::iterator it = m_blocks.begin(); it != m_blocks.end(); it++)
         {
             for (std::size_t i = 0; i < m_block_size; i++)
             {
@@ -171,7 +169,7 @@ class ObjectPool
                 {
                     if (m_type_deconstructor != nullptr)
                     {
-                        byte* target = reinterpret_cast<byte*>(
+                        std::byte* target = reinterpret_cast<std::byte*>(
                             *it +
                             ((sizeof(ObjectPoolChunk) + m_type_size) * i + sizeof(ObjectPoolChunk))
                         );
@@ -204,8 +202,8 @@ class ObjectPool
         return m_freed_locations;
     }
 
-    inline const std::list<byte*>& get_blocks() const { return m_blocks; }
-    inline std::list<byte*>& get_blocks() { return m_blocks; }
+    inline const std::list<std::byte*>& get_blocks() const { return m_blocks; }
+    inline std::list<std::byte*>& get_blocks() { return m_blocks; }
 
     template<typename _T, typename... _Args>
     _T* malloc(Entity entity, _Args... args)
@@ -228,11 +226,11 @@ class ObjectPool
         return _construct<_T>(entity, m_next, args...);
     }
 
-    byte* malloc(Entity entity)
+    std::byte* malloc(Entity entity)
     {
         if (m_freed_locations.size() > 0)
         {
-            byte* object = _construct(entity, m_freed_locations.back());
+            std::byte* object = _construct(entity, m_freed_locations.back());
             m_freed_locations.pop_back();
 
             return object;
@@ -254,18 +252,18 @@ class ObjectPool
         type->~_T();
 
         ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(
-            reinterpret_cast<byte*>(type) - sizeof(ObjectPoolChunk)
+            reinterpret_cast<std::byte*>(type) - sizeof(ObjectPoolChunk)
         );
         chunk->entity = ECS_ENTITY_DESTROYED;
         m_freed_locations.push_back(chunk);
     }
 
-    void free(byte* ptr)
+    void free(std::byte* ptr)
     {
         m_type_deconstructor(ptr);
 
         ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(
-            reinterpret_cast<byte*>(ptr) - sizeof(ObjectPoolChunk)
+            reinterpret_cast<std::byte*>(ptr) - sizeof(ObjectPoolChunk)
         );
         chunk->entity = ECS_ENTITY_DESTROYED;
         m_freed_locations.push_back(chunk);
@@ -273,7 +271,7 @@ class ObjectPool
 
     void free(ObjectPoolChunk* chunk)
     {
-        m_type_deconstructor(reinterpret_cast<byte*>(chunk) + sizeof(ObjectPoolChunk));
+        m_type_deconstructor(reinterpret_cast<std::byte*>(chunk) + sizeof(ObjectPoolChunk));
 
         chunk->entity = ECS_ENTITY_DESTROYED;
         m_freed_locations.push_back(chunk);
@@ -289,7 +287,7 @@ class ObjectPool
         {
             if (chunk->entity == entity)
             {
-                byte* byte_data = reinterpret_cast<byte*>(chunk);
+                std::byte* byte_data = reinterpret_cast<std::byte*>(chunk);
                 return reinterpret_cast<_T*>(byte_data + sizeof(ObjectPoolChunk));
             }
 
@@ -299,7 +297,7 @@ class ObjectPool
         return nullptr;
     }
 
-    byte* get_entitys_object(Entity entity)
+    std::byte* get_entitys_object(Entity entity)
     {
         ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(m_blocks.front());
 
@@ -307,7 +305,7 @@ class ObjectPool
         {
             if (chunk->entity == entity)
             {
-                byte* byte_data = reinterpret_cast<byte*>(chunk);
+                std::byte* byte_data = reinterpret_cast<std::byte*>(chunk);
                 return byte_data + sizeof(ObjectPoolChunk);
             }
 
@@ -340,7 +338,7 @@ class ObjectPool
         chunk->entity = entity;
 
         _T* object =
-            reinterpret_cast<_T*>(reinterpret_cast<byte*>(chunk) + sizeof(ObjectPoolChunk));
+            reinterpret_cast<_T*>(reinterpret_cast<std::byte*>(chunk) + sizeof(ObjectPoolChunk));
 
         new (object) _T(args...);
         m_next = m_next->next;
@@ -348,11 +346,11 @@ class ObjectPool
         return object;
     }
 
-    byte* _construct(Entity entity, ObjectPoolChunk* chunk)
+    std::byte* _construct(Entity entity, ObjectPoolChunk* chunk)
     {
         chunk->entity = entity;
 
-        byte* object = reinterpret_cast<byte*>(chunk) + sizeof(ObjectPoolChunk);
+        std::byte* object = reinterpret_cast<std::byte*>(chunk) + sizeof(ObjectPoolChunk);
         m_type_default_constructor(object);
         m_next = m_next->next;
 
@@ -363,7 +361,7 @@ class ObjectPool
     {
         const std::size_t chunk_size = sizeof(ObjectPoolChunk) + m_type_size;
 
-        byte* block = static_cast<byte*>(std::malloc(sizeof(byte) * chunk_size * m_block_size));
+        std::byte* block = static_cast<std::byte*>(std::malloc(sizeof(std::byte) * chunk_size * m_block_size));
         m_blocks.push_back(block);
         ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(block);
         chunk->next = reinterpret_cast<ObjectPoolChunk*>(block + chunk_size);
@@ -394,7 +392,7 @@ class ObjectPool
     const std::size_t m_type_size = 0;
     const std::uint64_t m_type_hash = 0;
     const std::size_t m_block_size = 0;
-    std::list<byte*> m_blocks = {};
+    std::list<std::byte*> m_blocks = {};
     ObjectPoolChunk* m_next = nullptr;
     std::vector<ObjectPoolChunk*> m_freed_locations = {};
     fnptr_objectpool_type_default_constructor m_type_default_constructor = nullptr;
@@ -479,7 +477,7 @@ class Registry
         ObjectPool* pool = get_pool(hash);
         if (pool != nullptr)
         {
-            byte* byte_data = reinterpret_cast<byte*>(pool->get_entitys_object_pool_chunk(entity));
+            std::byte* byte_data = reinterpret_cast<std::byte*>(pool->get_entitys_object_pool_chunk(entity));
             return reinterpret_cast<void*>(byte_data + sizeof(ObjectPoolChunk));
         }
         return nullptr;
