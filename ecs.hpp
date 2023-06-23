@@ -361,7 +361,8 @@ class ObjectPool
     {
         const std::size_t chunk_size = sizeof(ObjectPoolChunk) + m_type_size;
 
-        std::byte* block = static_cast<std::byte*>(std::malloc(sizeof(std::byte) * chunk_size * m_block_size));
+        std::byte* block =
+            static_cast<std::byte*>(std::malloc(sizeof(std::byte) * chunk_size * m_block_size));
         m_blocks.push_back(block);
         ObjectPoolChunk* chunk = reinterpret_cast<ObjectPoolChunk*>(block);
         chunk->next = reinterpret_cast<ObjectPoolChunk*>(block + chunk_size);
@@ -477,8 +478,12 @@ class Registry
         ObjectPool* pool = get_pool(hash);
         if (pool != nullptr)
         {
-            std::byte* byte_data = reinterpret_cast<std::byte*>(pool->get_entitys_object_pool_chunk(entity));
-            return reinterpret_cast<void*>(byte_data + sizeof(ObjectPoolChunk));
+            ObjectPoolChunk* chunk = pool->get_entitys_object_pool_chunk(entity);
+            if (chunk != nullptr)
+            {
+                std::byte* byte_data = reinterpret_cast<std::byte*>(chunk);
+                return reinterpret_cast<void*>(byte_data + sizeof(ObjectPoolChunk));
+            }
         }
         return nullptr;
     }
