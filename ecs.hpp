@@ -124,6 +124,13 @@ namespace type_descriptor {
             if (typename_str[i] == '<')
                 break;
 
+            if (typename_str[i] == '[')
+            {
+                if (typename_str[i - 1] == ' ')
+                    offset--;
+                break;
+            }
+
             if (typename_str[i] == ' ' || typename_str[i] == ':')
                 offset = i;
         }
