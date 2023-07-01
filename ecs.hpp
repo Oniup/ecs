@@ -35,12 +35,12 @@
 #include <tuple>
 #include <vector>
 
-#define ECS_TYPE_CONTRADICTION_ASSERT(CONDITION, TYPE_NAME, OTHER_TYPE_NAME, FUNCTION_NAME) \
-    if (!(CONDITION))                                                                       \
-    {                                                                                       \
-        std::string message = std::string("ECS ASSERT: cannot ") + FUNCTION_NAME + " " +    \
-                              OTHER_TYPE_NAME + " in object pool for " + TYPE_NAME;         \
-        assert(CONDITION&& message.c_str());                                                \
+#define ECS_TYPE_CONTRADICTION_ASSERT(CONDITION, TYPE_NAME, OTHER_TYPE_NAME, FUNCTION_NAME)       \
+    if (!(CONDITION))                                                                             \
+    {                                                                                             \
+        std::cout << std::string("ECS ASSERT: cannot ") + FUNCTION_NAME + " " + OTHER_TYPE_NAME + \
+                         " in object pool for " + TYPE_NAME;                                      \
+        std::exit(-1);                                                                            \
     }
 
 #define ECS_REGISTRY_DEFAULT_POOL_BLOCK_SIZE 30
@@ -61,7 +61,7 @@ namespace type_descriptor {
      * @return const char* Example using clang is above
      */
     template<typename _T>
-    constexpr const char* get_wrapped_type_name()
+    constexpr const char* get_wrapped_typename()
     {
 #if defined(__clang__)
         return __PRETTY_FUNCTION__;
@@ -73,15 +73,16 @@ namespace type_descriptor {
 #    error "Unsuppored compiler ecs system"
 #endif
     }
+
     /**
      * @brief Gets the get_wrapped_type_name<_T>() result and returns the length before the type
      * name appears in the string
      *
      * @return std::size_t Prefix length
      */
-    constexpr std::size_t get_wrapped_type_name_prefix_length()
+    constexpr std::size_t get_wrapped_typename_prefix_length()
     {
-        constexpr const char* wrapped_name = get_wrapped_type_name<void>();
+        constexpr const char* wrapped_name = get_wrapped_typename<void>();
         constexpr std::size_t wrapped_length = std::char_traits<char>::length(wrapped_name);
 
         std::size_t offset = 0;
@@ -92,17 +93,46 @@ namespace type_descriptor {
         }
         return offset;
     }
+
     /**
      * @brief Get the get_wrapped_type_name() result and returns the length after the type name
      * appears in the string
      *
      * @return std::size_t Suffix length
      */
-    constexpr std::size_t get_wrapped_type_name_suffix_length()
+    constexpr std::size_t get_wrapped_typename_suffix_length()
     {
-        return std::char_traits<char>::length(get_wrapped_type_name<void>()) -
-               get_wrapped_type_name_prefix_length() - 4;
+        return std::char_traits<char>::length(get_wrapped_typename<void>()) -
+               get_wrapped_typename_prefix_length() - 4;
     }
+
+    /**
+     * @brief Checks through the given name for ' ' and ':' indercating compiler differences with
+     * the get_wrapped_type_name() function macros used. This is done to remove this bloat in the
+     * final result such as namespaces and keywords like struct, enum, class, etc
+     *
+     * @param typename_str type name as string
+     * @param length length for the typename
+     * @return returns the length of bloat
+     */
+    constexpr std::size_t
+        get_typename_prefix_bloat_length(const char* typename_str, std::size_t length)
+    {
+        std::size_t offset = std::string::npos;
+        for (std::size_t i = 0; i < length; i++)
+        {
+            if (typename_str[i] == '<')
+                break;
+
+            if (typename_str[i] == ' ' || typename_str[i] == ':')
+                offset = i;
+        }
+
+        if (offset != std::string::npos)
+            offset += 1;
+        return offset;
+    }
+
     /**
      * @brief Calculates the name of the type
      *
@@ -112,20 +142,31 @@ namespace type_descriptor {
     template<typename _T>
     constexpr auto get_name()
     {
-        constexpr const char* wrapped_type_name = get_wrapped_type_name<_T>();
+        constexpr const char* wrapped_type_name = get_wrapped_typename<_T>();
         constexpr std::size_t wrapped_type_length =
             std::char_traits<char>::length(wrapped_type_name);
 
-        constexpr std::size_t prefix_length = get_wrapped_type_name_prefix_length();
-        constexpr std::size_t suffix_lenght = get_wrapped_type_name_suffix_length();
+        constexpr std::size_t prefix_length = get_wrapped_typename_prefix_length();
+        constexpr std::size_t suffix_lenght = get_wrapped_typename_suffix_length();
+        constexpr std::size_t substr_length = wrapped_type_length - prefix_length - suffix_lenght;
 
-        std::array<char, wrapped_type_length - prefix_length - suffix_lenght> substr;
+        constexpr std::size_t bloat_offset =
+            get_typename_prefix_bloat_length(wrapped_type_name + prefix_length, substr_length);
+
+        constexpr bool remove_bloat = bloat_offset != std::string::npos;
+        std::array<char, remove_bloat ? substr_length - bloat_offset : substr_length> substr;
+
+        constexpr const char* offset_wrapped_type_name =
+            remove_bloat ? wrapped_type_name + prefix_length + bloat_offset
+                         : wrapped_type_name + prefix_length;
+
         for (std::size_t i = 0; i < substr.size(); i++)
-            substr[i] = (wrapped_type_name + prefix_length)[i];
+            substr[i] = offset_wrapped_type_name[i];
 
         substr[substr.size()] = '\0';
         return substr;
     }
+
     /**
      * @brief Calculats Fowler–Noll–Vo hash function (FNV) for more information:
      * https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function
@@ -162,6 +203,7 @@ struct Entity
     inline bool operator==(const Entity& other) const { return id == other.id; }
     inline bool operator!=(const Entity& other) const { return id != other.id; }
 };
+
 /**
  * @class ObjectPoolChunk
  * @brief Defines what object this entity is defined, its previous and the next object pool chunk.
@@ -188,8 +230,10 @@ class ObjectPool
     static ObjectPool* create(std::size_t block_size)
     {
         ObjectPool* pool = new ObjectPool(
-            std::string(type_descriptor::get_name<_T>().data()), sizeof(_T),
-            type_descriptor::get_hash(type_descriptor::get_name<_T>()), block_size
+            std::string(
+                type_descriptor::get_name<_T>().data(), type_descriptor::get_name<_T>().size()
+            ),
+            sizeof(_T), type_descriptor::get_hash(type_descriptor::get_name<_T>()), block_size
         );
 
         pool->m_type_default_constructor = [](std::byte* target)
@@ -273,8 +317,10 @@ class ObjectPool
     _T* malloc(Entity entity, _Args... args)
     {
         ECS_TYPE_CONTRADICTION_ASSERT(
-            std::string(type_descriptor::get_name<_T>().data()) == m_type_name, m_type_name,
-            type_descriptor::get_name<_T>().data(), "malloc"
+            std::string(
+                type_descriptor::get_name<_T>().data(), type_descriptor::get_name<_T>().size()
+            ) == m_type_name,
+            m_type_name, type_descriptor::get_name<_T>().data(), "malloc"
         );
 
         if (m_freed_locations.size() > 0)
@@ -309,8 +355,10 @@ class ObjectPool
     void free(_T* type)
     {
         ECS_TYPE_CONTRADICTION_ASSERT(
-            std::string(type_descriptor::get_name<_T>().data()) == m_type_name, m_type_name,
-            type_descriptor::get_name<_T>().data(), "free"
+            std::string(
+                type_descriptor::get_name<_T>().data(), type_descriptor::get_name<_T>().size()
+            ) == m_type_name,
+            m_type_name, type_descriptor::get_name<_T>().data(), "free"
         );
 
         type->~_T();
@@ -550,6 +598,11 @@ class Registry
             }
         }
         return nullptr;
+    }
+
+    const void* get_component(Entity entity, std::uint64_t hash) const
+    {
+        return get_component(entity, hash);
     }
 
     void destroy_entity(Entity entity)
