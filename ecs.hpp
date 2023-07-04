@@ -124,15 +124,14 @@ namespace type_descriptor {
             if (typename_str[i] == '<')
                 break;
 
-            if (typename_str[i] == '[')
-            {
-                if (typename_str[i - 1] == ' ')
-                    offset--;
-                break;
-            }
-
             if (typename_str[i] == ' ' || typename_str[i] == ':')
+            {
+                // means there is an array and we want that
+                if (i + 1 < length && typename_str[i + 1] == '[')
+                    break;
+
                 offset = i;
+            }
         }
 
         if (offset != std::string::npos)
