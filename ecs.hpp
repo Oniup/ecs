@@ -656,7 +656,7 @@ class Registry
         return target->malloc<_T>(entity, args...);
     }
 
-    void* create_component(
+    std::byte* create_component(
         Entity entity, std::uint64_t id, const std::string& name, std::size_t size,
         fnptr_objectpool_type_deconstructor deconstructor,
         fnptr_objectpool_type_default_constructor default_constsructor,
